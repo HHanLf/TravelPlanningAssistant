@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     qwen_embedding_model: str = "text-embedding-v4"
 
     asr_provider: str = "aliyun_nls"
-    aliyun_nls_app_key: str = ""
+    aliyun_nls_app_key: str = "..."
     aliyun_nls_token: str = ""
     aliyun_nls_url: str = "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
     aliyun_access_key_id: str = ""
