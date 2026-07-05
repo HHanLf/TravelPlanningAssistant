@@ -1,0 +1,77 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/dist/
+dist/
+
+# Build / cache
+build/
+.cache/
+*.log
+logs/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Local databases / runtime files
+*.db
+*.sqlite
+*.sqlite3
+redis-data/
+mysql-data/
+
+# Uploads / generated assets
+data/uploads/
+uploads/
+*.webm
+*.wav
+*.mp3
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Misc
+.tmp/
+tmp/
+*.tmp
+*.bak
