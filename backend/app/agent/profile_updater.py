@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.app.domain.models import UserProfile
+from app.domain.models import UserProfile
 
 
 class ProfileUpdater:

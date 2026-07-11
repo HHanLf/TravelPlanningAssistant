@@ -40,6 +40,8 @@ class UserProfile:
     days: int | None = None
     companions: int | None = None
     preferences: list[str] = field(default_factory=list)
+    date_range: dict[str, str] | None = None
+    constraints: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

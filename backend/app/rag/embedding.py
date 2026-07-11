@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from backend.app.config.settings import get_settings
+from app.config.settings import get_settings
 
 
 class EmbeddingModel(Protocol):

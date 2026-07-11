@@ -1,25 +1,39 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
 
 
 class WeatherTool:
-    def __init__(self, api_key: str = "") -> None:
+    """Tencent Map weather client used by the unified tool adapter."""
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "https://apis.map.qq.com",
+        geocoder_path: str = "/ws/geocoder/v1/",
+        weather_path: str = "/ws/weather/v1/",
+    ) -> None:
         self.api_key = api_key
-        self.base_url = "https://apis.map.qq.com"
+        self.base_url = base_url.rstrip("/")
+        self.geocoder_path = geocoder_path
+        self.weather_path = weather_path
 
     def get_weather(self, city: str, day_offset: int = 0, date_label: str = "") -> dict[str, Any]:
         city = (city or "").strip()
         if not city:
-            return {"city": "", "error": "city is required", "fallback": True}
+            return {"city": "", "error": "city is required", "fallback": False}
         if not self.api_key:
-            return {"city": city, "error": "weather api key is not configured", "fallback": True}
+            return {"city": city, "error": "weather api key is not configured", "fallback": False}
 
-        resolved = self._resolve_weather_location(city)
+        try:
+            resolved = self._resolve_weather_location(city)
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            return {"city": city, "error": f"weather location resolve failed: {exc}", "fallback": False}
         if not resolved:
-            return {"city": city, "error": "failed to resolve city for weather query", "fallback": True}
+            return {"city": city, "error": "failed to resolve city for weather query", "fallback": False}
 
         try:
             now_payload = self._request_weather(
@@ -28,8 +42,8 @@ class WeatherTool:
             future_payload = self._request_weather(
                 {"adcode": resolved["adcode"], "type": "future", "added_fields": "index,air"}
             )
-        except (httpx.HTTPError, ValueError) as exc:
-            return {"city": city, "error": f"weather api request failed: {exc}", "fallback": True}
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            return {"city": city, "error": f"weather api request failed: {exc}", "fallback": False}
 
         now_error = self._extract_api_error(now_payload)
         future_error = self._extract_api_error(future_payload)
@@ -38,7 +52,7 @@ class WeatherTool:
                 "city": city,
                 "resolved_city": resolved.get("city") or city,
                 "error": future_error or now_error,
-                "fallback": True,
+                "fallback": False,
                 "raw": {"now": now_payload, "future": future_payload},
             }
 
@@ -60,7 +74,7 @@ class WeatherTool:
         )
         recommendation = self._build_recommendation(day_info, night_info, realtime_entry)
 
-        result = {
+        return {
             "provider": "tencent_map_weather",
             "city": city,
             "resolved_city": resolved.get("city") or city,
@@ -103,28 +117,25 @@ class WeatherTool:
                 "future": future_payload,
             },
         }
-        return result
 
     def _resolve_weather_location(self, city: str) -> dict[str, Any] | None:
         try:
-            with httpx.Client(timeout=10.0) as client:
-                response = client.get(
-                    f"{self.base_url}/ws/geocoder/v1/",
-                    params={"address": city, "key": self.api_key, "output": "json"},
-                )
-                response.raise_for_status()
-                payload = response.json()
+            payload = self._request_json(
+                self.geocoder_path,
+                {"address": city, "key": self.api_key, "output": "json"},
+                timeout_seconds=10.0,
+            )
         except (httpx.HTTPError, ValueError):
-            return None
+            raise
 
         if payload.get("status") != 0:
-            return None
+            raise RuntimeError(self._api_error_message("腾讯地图天气地理编码", payload))
 
         result = payload.get("result") or {}
         ad_info = result.get("ad_info") or {}
         adcode = ad_info.get("adcode")
         if adcode is None:
-            return None
+            raise RuntimeError("腾讯地图天气地理编码失败：未返回 adcode")
 
         return {
             "city": ad_info.get("city") or city,
@@ -135,53 +146,72 @@ class WeatherTool:
         }
 
     def _request_weather(self, params: dict[str, Any]) -> dict[str, Any]:
-        with httpx.Client(timeout=15.0) as client:
-            response = client.get(
-                f"{self.base_url}/ws/weather/v1/",
-                params={**params, "key": self.api_key, "output": "json"},
-            )
-            response.raise_for_status()
-            return response.json()
+        return self._request_json(
+            self.weather_path,
+            {**params, "key": self.api_key, "output": "json"},
+            timeout_seconds=15.0,
+        )
 
-    def _extract_api_error(self, payload: dict[str, Any]) -> str | None:
+    def _request_json(self, path: str, params: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        last_error: Exception | None = None
+        timeout = httpx.Timeout(connect=8.0, read=timeout_seconds, write=8.0, pool=8.0)
+        for attempt in range(3):
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False, headers={"Connection": "close"}) as client:
+                    response = client.get(url, params=params)
+                response.raise_for_status()
+                return response.json()
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.TimeoutException) as exc:
+                last_error = exc
+                if attempt < 2:
+                    time.sleep(0.4 * (attempt + 1))
+                continue
+        raise RuntimeError(f"腾讯地图天气网络请求失败：{last_error}")
+
+    @staticmethod
+    def _extract_api_error(payload: dict[str, Any]) -> str | None:
         if payload.get("status") == 0:
             return None
-        return str(payload.get("message") or f"weather api error: {payload.get('status')}")
+        return WeatherTool._api_error_message("腾讯地图天气查询", payload)
 
-    def _extract_realtime_entry(self, payload: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _api_error_message(action: str, payload: dict[str, Any]) -> str:
+        status = payload.get("status")
+        message = payload.get("message") or payload.get("msg") or payload.get("info") or payload.get("errmsg") or "接口返回异常"
+        return f"{action}失败：status={status}，message={message}"
+
+    @staticmethod
+    def _extract_realtime_entry(payload: dict[str, Any]) -> dict[str, Any]:
         realtime = payload.get("result", {}).get("realtime") or []
-        if isinstance(realtime, list) and realtime:
-            first = realtime[0]
-            if isinstance(first, dict):
-                return first
+        if isinstance(realtime, list) and realtime and isinstance(realtime[0], dict):
+            return realtime[0]
         return {}
 
-    def _extract_future_entries(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _extract_future_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
         forecast = payload.get("result", {}).get("forecast") or []
-        if not isinstance(forecast, list) or not forecast:
+        if not isinstance(forecast, list) or not forecast or not isinstance(forecast[0], dict):
             return []
         first = forecast[0]
-        if not isinstance(first, dict):
-            return []
         infos = first.get("infos") or []
         if not isinstance(infos, list):
             return []
 
         entries: list[dict[str, Any]] = []
         for item in infos:
-            if not isinstance(item, dict):
-                continue
-            entries.append(
-                {
-                    "province": first.get("province"),
-                    "city": first.get("city"),
-                    "district": first.get("district"),
-                    "adcode": first.get("adcode"),
-                    "update_time": first.get("update_time"),
-                    "forecast_date": item.get("date") or item.get("forecast_date"),
-                    **item,
-                }
-            )
+            if isinstance(item, dict):
+                entries.append(
+                    {
+                        "province": first.get("province"),
+                        "city": first.get("city"),
+                        "district": first.get("district"),
+                        "adcode": first.get("adcode"),
+                        "update_time": first.get("update_time"),
+                        "forecast_date": item.get("date") or item.get("forecast_date"),
+                        **item,
+                    }
+                )
         return entries
 
     def _extract_air_info(self, now_payload: dict[str, Any], future_payload: dict[str, Any]) -> dict[str, Any]:
@@ -191,24 +221,18 @@ class WeatherTool:
             return realtime_air
 
         forecast = future_payload.get("result", {}).get("forecast") or []
-        if isinstance(forecast, list) and forecast:
-            first = forecast[0]
-            if isinstance(first, dict):
-                air_list = first.get("air") or []
-                if isinstance(air_list, list) and air_list:
-                    air = air_list[0]
-                    if isinstance(air, dict):
-                        return air
+        if isinstance(forecast, list) and forecast and isinstance(forecast[0], dict):
+            air_list = forecast[0].get("air") or []
+            if isinstance(air_list, list) and air_list and isinstance(air_list[0], dict):
+                return air_list[0]
         return {}
 
-    def _extract_indexes(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    @staticmethod
+    def _extract_indexes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         forecast = payload.get("result", {}).get("forecast") or []
-        if not isinstance(forecast, list) or not forecast:
+        if not isinstance(forecast, list) or not forecast or not isinstance(forecast[0], dict):
             return []
-        first = forecast[0]
-        if not isinstance(first, dict):
-            return []
-        indexes = first.get("indexes") or []
+        indexes = forecast[0].get("indexes") or []
         if not isinstance(indexes, list):
             return []
 
@@ -220,16 +244,15 @@ class WeatherTool:
             if not isinstance(ids, list):
                 continue
             for item in ids[:5]:
-                if not isinstance(item, dict):
-                    continue
-                simplified.append(
-                    {
-                        "date": index_group.get("index_date"),
-                        "name": item.get("name"),
-                        "level": item.get("level"),
-                        "desc": item.get("desc"),
-                    }
-                )
+                if isinstance(item, dict):
+                    simplified.append(
+                        {
+                            "date": index_group.get("index_date"),
+                            "name": item.get("name"),
+                            "level": item.get("level"),
+                            "desc": item.get("desc"),
+                        }
+                    )
         return simplified
 
     def _build_recommendation(
@@ -251,7 +274,7 @@ class WeatherTool:
             return "早晚偏凉，建议带上薄外套，夜间户外活动不宜安排过久。"
         if humidity is not None and humidity >= 85:
             return "空气湿度较高，体感可能偏闷，建议行程节奏放缓并优先选择通风休息点。"
-        if any(keyword in weather_text for keyword in ["阴", "多云"]):
+        if any(keyword in weather_text for keyword in ("晴", "多云")):
             return "天气相对平稳，适合把主要户外景点安排在白天，室内项目作为机动备选。"
         return "整体天气较适合出行，可优先安排核心户外景点在白天完成。"
 
@@ -262,7 +285,7 @@ class WeatherTool:
         realtime_entry: dict[str, Any],
     ) -> bool:
         weather_text = self._weather_text(day_info, night_info, realtime_entry)
-        return any(keyword in weather_text for keyword in ["雨", "雪", "雷", "暴"])
+        return any(keyword in weather_text for keyword in ("雨", "雪", "雷", "雾", "霾"))
 
     def _travel_mode_hint(
         self,
@@ -277,8 +300,8 @@ class WeatherTool:
             return "avoid_midday_outdoor"
         return "balanced"
 
+    @staticmethod
     def _weather_text(
-        self,
         day_info: dict[str, Any],
         night_info: dict[str, Any],
         realtime_entry: dict[str, Any],
@@ -294,16 +317,18 @@ class WeatherTool:
             )
         )
 
-    def _build_default_date_label(self, day_offset: int) -> str:
+    @staticmethod
+    def _build_default_date_label(day_offset: int) -> str:
         if day_offset <= 0:
             return "今天"
         if day_offset == 1:
             return "明天"
         if day_offset == 2:
             return "后天"
-        return f"第{day_offset + 1}天"
+        return f"第 {day_offset + 1} 天"
 
-    def _safe_int(self, value: Any) -> int | None:
+    @staticmethod
+    def _safe_int(value: Any) -> int | None:
         try:
             return int(value)
         except (TypeError, ValueError):

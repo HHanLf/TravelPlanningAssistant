@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from backend.app.rag.embedding import TextEmbeddingV4Model
+from app.rag.embedding import TextEmbeddingV4Model
 
 
 @dataclass

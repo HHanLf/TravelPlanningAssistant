@@ -17,6 +17,9 @@ class ChatResponse(BaseModel):
     tool_results: dict
     memory_context: dict
     reflection_result: dict
+    knowledge_summary: dict = Field(default_factory=dict)
+    research_tasks: list[dict] = Field(default_factory=list)
+    evidence_items: list[dict] = Field(default_factory=list)
     retrieved_docs: list[dict] = Field(default_factory=list)
     profile: dict = Field(default_factory=dict)
     multimodal_summary: str | None = None

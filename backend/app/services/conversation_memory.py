@@ -1,7 +1,7 @@
 from collections import deque
 from dataclasses import dataclass, asdict
 
-from backend.app.core.config import get_settings
+from app.core.config import get_settings
 
 
 settings = get_settings()

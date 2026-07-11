@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.app.services.llm_service import DashScopeLLMService
+from app.services.llm_service import DashScopeLLMService
 
 
 class Executor:

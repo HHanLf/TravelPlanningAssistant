@@ -7,7 +7,7 @@ from typing import Any
 
 import redis
 
-from backend.app.config.settings import Settings, get_settings
+from app.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 

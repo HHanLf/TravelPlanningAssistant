@@ -3,47 +3,53 @@ from __future__ import annotations
 from abc import ABC
 from typing import Any
 
-from backend.app.domain.models import AgentContext, ToolResult, ToolSpec
+from app.agent.state import AgentState, ToolResult
+from app.domain.models import ToolSpec
 
 
 class BaseTool(ABC):
     spec: ToolSpec
 
-    async def execute(self, context: AgentContext, arguments: dict[str, Any]) -> ToolResult:
-        del context
+    async def execute(self, state: AgentState, arguments: dict[str, Any]) -> ToolResult:
+        del state
         runner = getattr(self, "run", None)
         if not callable(runner):
             return ToolResult(
-                name=getattr(self, "name", self.__class__.__name__),
+                name=self.spec.name,
+                arguments=arguments,
                 success=False,
-                payload={},
-                error="tool does not implement run() or execute()",
+                error="tool does not implement run()",
             )
 
         try:
             result = runner(**arguments)
-            if isinstance(result, ToolResult):
-                return result
             payload = result if isinstance(result, dict) else {"result": result}
             return ToolResult(
-                name=getattr(self, "name", self.__class__.__name__),
+                name=self.spec.name,
+                arguments=arguments,
                 success=True,
                 payload=payload,
-                error=None,
+                summary=self.summarize(payload),
             )
         except Exception as exc:  # noqa: BLE001
             return ToolResult(
-                name=getattr(self, "name", self.__class__.__name__),
+                name=self.spec.name,
+                arguments=arguments,
                 success=False,
-                payload={},
                 error=str(exc),
             )
 
     def validate(self, arguments: dict[str, Any]) -> list[str]:
-        spec = getattr(self, "spec", None)
-        required_fields = getattr(spec, "required_fields", []) if spec is not None else []
         missing: list[str] = []
-        for field_name in required_fields:
-            if not arguments.get(field_name):
+        for field_name in getattr(self.spec, "required_fields", []):
+            if arguments.get(field_name) in (None, "", []):
                 missing.append(field_name)
         return missing
+
+    def summarize(self, payload: dict[str, Any]) -> str:
+        if payload.get("summary"):
+            return str(payload["summary"])
+        if payload.get("error"):
+            return str(payload["error"])
+        compact = {key: value for key, value in payload.items() if key != "raw"}
+        return str(compact)[:240]

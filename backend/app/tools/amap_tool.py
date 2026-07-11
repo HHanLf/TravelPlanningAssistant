@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 import httpx
 
-from backend.app.tools.base import BaseTool
+from app.tools.base import BaseTool
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +14,21 @@ logger = logging.getLogger(__name__)
 class TencentMapTool(BaseTool):
     name = "tencent_map"
 
-    def __init__(self, api_key: str = "", secret_key: str = "") -> None:
+    def __init__(
+        self,
+        api_key: str = "",
+        secret_key: str = "",
+        base_url: str = "https://apis.map.qq.com",
+        place_search_path: str = "/ws/place/v1/search",
+        geocoder_path: str = "/ws/geocoder/v1/",
+        direction_path_prefix: str = "/ws/direction/v1",
+    ) -> None:
         self.api_key = api_key
         self.secret_key = secret_key
-        self.base_url = "https://apis.map.qq.com"
+        self.base_url = base_url.rstrip("/")
+        self.place_search_path = place_search_path
+        self.geocoder_path = geocoder_path
+        self.direction_path_prefix = direction_path_prefix.rstrip("/")
 
     def run(self, **kwargs: Any) -> dict[str, Any]:
         tool = kwargs.get("tool")
@@ -27,8 +39,21 @@ class TencentMapTool(BaseTool):
         return {"provider": "tencent_map", "params": kwargs, "result": "unsupported tool"}
 
     def route_plan(self, origin: str, destination: str, mode: str = "driving") -> dict[str, Any]:
-        origin_location = self._resolve_location(origin)
-        destination_location = self._resolve_location(destination)
+        try:
+            origin_location = self._resolve_location(origin)
+            destination_location = self._resolve_location(destination)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Tencent map location resolution failed",
+                extra={"origin": origin, "destination": destination, "error": str(exc)},
+            )
+            return {
+                "provider": "tencent_map",
+                "origin": origin,
+                "destination": destination,
+                "error": f"腾讯地图坐标解析失败：{exc}",
+                "fallback": False,
+            }
         if not origin_location or not destination_location:
             logger.warning(
                 "Tencent map location resolution failed",
@@ -44,13 +69,13 @@ class TencentMapTool(BaseTool):
                 "origin": origin,
                 "destination": destination,
                 "error": "无法解析起点或终点坐标",
-                "fallback": True,
+                "fallback": False,
             }
 
         route_mode = self._normalize_route_mode(mode)
         try:
             data = self._request_json(
-                f"/ws/direction/v1/{route_mode}/",
+                f"{self.direction_path_prefix}/{route_mode}/",
                 params={"from": origin_location, "to": destination_location, "policy": "LEAST_TIME", "get_mp": 1, "get_speed": 1},
             )
             if data.get("status") not in (None, 0):
@@ -71,8 +96,8 @@ class TencentMapTool(BaseTool):
                     "destination": destination,
                     "origin_location": origin_location,
                     "destination_location": destination_location,
-                    "error": data.get("message") or "路线接口返回异常",
-                    "fallback": True,
+                    "error": self._api_error_message("腾讯地图路线规划", data),
+                    "fallback": False,
                     "raw": data,
                 }
 
@@ -99,7 +124,7 @@ class TencentMapTool(BaseTool):
                     "origin_location": origin_location,
                     "destination_location": destination_location,
                     "error": data.get("message") or "未返回路线结果",
-                    "fallback": True,
+                    "fallback": False,
                     "raw": data,
                 }
             return {
@@ -116,7 +141,7 @@ class TencentMapTool(BaseTool):
                 "raw": route,
             }
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
+            logger.warning(
                 "Tencent map route plan failed",
                 extra={
                     "origin": origin,
@@ -133,7 +158,7 @@ class TencentMapTool(BaseTool):
                 "origin_location": origin_location,
                 "destination_location": destination_location,
                 "error": str(exc),
-                "fallback": True,
+                "fallback": False,
             }
 
     def search_place(self, keyword: str, city: str) -> list[dict[str, Any]]:
@@ -143,7 +168,7 @@ class TencentMapTool(BaseTool):
             return []
         try:
             data = self._request_json(
-                "/ws/place/v1/search",
+                self.place_search_path,
                 params={"keyword": keyword, "boundary": f"region({city},1)", "page_size": 5, "get_subpois": 1, "added_fields": "category_code"},
             )
             if data.get("status") not in (None, 0):
@@ -151,7 +176,7 @@ class TencentMapTool(BaseTool):
                     "Tencent map place search returned error",
                     extra={"keyword": keyword, "city": city, "response": data},
                 )
-                raise RuntimeError(str(data.get("message") or "地点搜索失败"))
+                raise RuntimeError(self._api_error_message("腾讯地图地点搜索", data))
             items = (data.get("data") or [])[:5]
             if items:
                 return [
@@ -165,7 +190,8 @@ class TencentMapTool(BaseTool):
                     for item in items
                 ]
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Tencent map place search failed", extra={"keyword": keyword, "city": city, "error": str(exc)})
+            logger.warning("Tencent map place search failed", extra={"keyword": keyword, "city": city, "error": str(exc)})
+            raise RuntimeError(f"腾讯地图地点搜索失败：keyword={keyword}，city={city}，reason={exc}") from exc
 
         return []
 
@@ -190,12 +216,12 @@ class TencentMapTool(BaseTool):
             return None
         try:
             data = self._request_json(
-                "/ws/geocoder/v1/",
+                self.geocoder_path,
                 params={"address": location, "get_poi": 1},
             )
             if data.get("status") not in (None, 0):
                 logger.error("Tencent map geocode returned error", extra={"location": location, "response": data})
-                return None
+                raise RuntimeError(self._api_error_message("腾讯地图地理编码", data))
             result = data.get("result") or {}
             location_data = result.get("location") or {}
             lat = location_data.get("lat")
@@ -204,19 +230,21 @@ class TencentMapTool(BaseTool):
                 logger.warning("Tencent map geocode returned empty location", extra={"location": location, "response": data})
                 return None
             return f"{lat},{lng}"
+        except RuntimeError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Tencent map geocode failed", extra={"location": location, "error": str(exc)})
-            return None
+            logger.warning("Tencent map geocode failed", extra={"location": location, "error": str(exc)})
+            raise RuntimeError(f"腾讯地图地理编码失败：location={location}，reason={exc}") from exc
 
     def _search_location(self, location: str) -> str | None:
         try:
             data = self._request_json(
-                "/ws/place/v1/search",
+                self.place_search_path,
                 params={"keyword": location, "boundary": f"region({location},1)", "page_size": 1, "get_subpois": 1},
             )
             if data.get("status") not in (None, 0):
                 logger.error("Tencent map location search returned error", extra={"location": location, "response": data})
-                return None
+                raise RuntimeError(self._api_error_message("腾讯地图地点定位", data))
             items = data.get("data") or []
             if not items:
                 return None
@@ -226,9 +254,11 @@ class TencentMapTool(BaseTool):
             if lat is None or lng is None:
                 return None
             return f"{lat},{lng}"
+        except RuntimeError:
+            raise
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Tencent map location search failed", extra={"location": location, "error": str(exc)})
-            return None
+            logger.warning("Tencent map location search failed", extra={"location": location, "error": str(exc)})
+            raise RuntimeError(f"腾讯地图地点定位失败：location={location}，reason={exc}") from exc
 
     def _city_center_fallback(self, location: str) -> str | None:
         centers = {
@@ -259,24 +289,66 @@ class TencentMapTool(BaseTool):
             return normalized
         return "driving"
 
+    @staticmethod
+    def _api_error_message(action: str, data: dict[str, Any]) -> str:
+        status = data.get("status")
+        message = data.get("message") or data.get("msg") or data.get("info") or data.get("errmsg") or "接口返回异常"
+        return f"{action}失败：status={status}，message={message}"
+
     def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         query = {k: v for k, v in params.items() if v is not None}
         query["key"] = self.api_key
         query.setdefault("output", "json")
-        response = httpx.get(f"{self.base_url}{path}", params=query, timeout=15.0)
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError:
-            logger.error(
-                "Tencent map HTTP error",
-                extra={"path": path, "status_code": response.status_code, "response_text": response.text, "params": {k: v for k, v in query.items() if k != 'key'}},
-            )
-            raise
+        url = f"{self.base_url}{path}"
+        last_error: Exception | None = None
+        response: httpx.Response | None = None
+        timeout = httpx.Timeout(connect=8.0, read=20.0, write=8.0, pool=8.0)
+        for attempt in range(3):
+            try:
+                with httpx.Client(timeout=timeout, trust_env=False, headers={"Connection": "close"}) as client:
+                    response = client.get(url, params=query)
+                response.raise_for_status()
+                break
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.TimeoutException) as exc:
+                last_error = exc
+                logger.warning(
+                    "Tencent map transport error, retrying",
+                    extra={
+                        "path": path,
+                        "attempt": attempt + 1,
+                        "error": str(exc),
+                        "params": {k: v for k, v in query.items() if k != "key"},
+                    },
+                )
+                if attempt < 2:
+                    time.sleep(0.4 * (attempt + 1))
+                continue
+            except httpx.HTTPStatusError:
+                assert response is not None
+                logger.error(
+                    "Tencent map HTTP error",
+                    extra={
+                        "path": path,
+                        "status_code": response.status_code,
+                        "response_text": response.text,
+                        "params": {k: v for k, v in query.items() if k != "key"},
+                    },
+                )
+                raise
+        else:
+            raise RuntimeError(f"腾讯地图网络请求失败：{last_error}")
+
+        if response is None:
+            raise RuntimeError("腾讯地图网络请求失败：未获得响应")
 
         data = response.json()
         if isinstance(data, dict) and data.get("status") not in (None, 0):
             logger.error(
-                "Tencent map API returned error",
-                extra={"path": path, "params": {k: v for k, v in query.items() if k != 'key'}, "response": data},
+                "Tencent map API returned error: path=%s status=%s message=%s params=%s",
+                path,
+                data.get("status"),
+                data.get("message") or data.get("msg") or data.get("info") or data.get("errmsg"),
+                {k: v for k, v in query.items() if k != "key"},
+                extra={"path": path, "params": {k: v for k, v in query.items() if k != "key"}, "response": data},
             )
         return data

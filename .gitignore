@@ -39,6 +39,8 @@ logs/
 .env.*
 !.env.example
 !.env.sample
+.envrc
+*.env
 backend/.env
 backend/.env.*
 !backend/.env.example
@@ -50,6 +52,9 @@ frontend/.env.*
 *.crt
 *.p12
 *.pfx
+*.secret
+*.credentials
+.streamlit/secrets.toml
 secrets/
 credentials/
 

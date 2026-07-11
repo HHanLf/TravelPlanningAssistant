@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.app.tools.base import BaseTool
+from app.tools.base import BaseTool
 
 
 class SearchTool(BaseTool):
     name = "search"
 
-    def __init__(self, api_key: str = "") -> None:
+    def __init__(self, api_key: str = "", base_url: str = "") -> None:
         self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
 
     def search(self, query: str) -> list[dict[str, str]]:
         return self.run(query=query)

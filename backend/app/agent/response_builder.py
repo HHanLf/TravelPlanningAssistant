@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backend.app.domain.models import AgentContext, AgentResponse, ToolResult
+from app.domain.models import AgentContext, AgentResponse, ToolResult
 
 
 class ResponseBuilder:

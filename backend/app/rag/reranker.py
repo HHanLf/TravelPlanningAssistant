@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from backend.app.rag.retriever import RetrievedDoc
+from app.rag.retriever import RetrievedDoc
 
 
 @dataclass

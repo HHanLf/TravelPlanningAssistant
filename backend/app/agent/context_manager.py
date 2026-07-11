@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.app.domain.models import AgentContext
-from backend.app.services.memory import MemoryService
+from app.domain.models import AgentContext
+from app.services.memory import MemoryService
 
 
 class ContextManager:

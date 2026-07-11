@@ -4,10 +4,10 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from backend.app.agent.executor import Executor
-from backend.app.agent.planner import Planner
-from backend.app.agent.reflection import ReflectionAgent
-from backend.app.agent.state import AgentState
+from app.agent.executor import Executor
+from app.agent.planner import Planner
+from app.agent.reflection import ReflectionAgent
+from app.agent.state import AgentState
 
 
 class TravelAgentGraph:

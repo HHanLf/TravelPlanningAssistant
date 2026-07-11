@@ -5,7 +5,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from backend.app.services.llm_service import DashScopeLLMService
+from app.services.llm_service import DashScopeLLMService
 
 
 class MultimodalService:

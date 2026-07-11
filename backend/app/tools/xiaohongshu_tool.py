@@ -6,15 +6,21 @@ from urllib.parse import urlencode
 
 import httpx
 
-from backend.app.tools.base import BaseTool
+from app.tools.base import BaseTool
 
 
 class XiaohongshuTool(BaseTool):
     name = "xiaohongshu_search"
 
-    def __init__(self, token: str = "", base_url: str = "https://api.justoneapi.com") -> None:
+    def __init__(
+        self,
+        token: str = "",
+        base_url: str = "https://api.justoneapi.com",
+        search_note_path: str = "/api/xiaohongshu/search-note/v4",
+    ) -> None:
         self.token = token.strip()
         self.base_url = base_url.rstrip("/")
+        self.search_note_path = search_note_path
         self.marketing_keywords = [
             "点击链接",
             "私信",
@@ -79,8 +85,8 @@ class XiaohongshuTool(BaseTool):
         keyword: str,
         page: int = 1,
         sort_type: str = "general",
-        note_type: str = "_0",
-        time_filter: str = "",
+        note_type: str = "ALL",
+        time_filter: str = "ALL",
         limit: int = 5,
     ) -> dict[str, Any]:
         return self.run(
@@ -106,8 +112,8 @@ class XiaohongshuTool(BaseTool):
 
         page = max(1, int(kwargs.get("page") or 1))
         sort_type = self._normalize_sort(str(kwargs.get("sort_type") or kwargs.get("sort") or "general"))
-        note_type = self._normalize_note_type(str(kwargs.get("note_type") or kwargs.get("noteType") or "_0"))
-        time_filter = self._normalize_note_time(str(kwargs.get("time_filter") or kwargs.get("noteTime") or ""))
+        note_type = self._normalize_note_type(str(kwargs.get("note_type") or kwargs.get("noteType") or "ALL"))
+        time_filter = self._normalize_note_time(str(kwargs.get("time_filter") or kwargs.get("timeFilter") or "ALL"))
         limit = max(1, min(int(kwargs.get("limit") or 5), 10))
 
         attempts = self._build_request_attempts(keyword, page, sort_type, note_type, time_filter)
@@ -117,7 +123,7 @@ class XiaohongshuTool(BaseTool):
         try:
             with httpx.Client(timeout=60.0) as client:
                 for attempt in attempts:
-                    url = f"{self.base_url}/api/xiaohongshu/search-note/v2?{urlencode(attempt)}"
+                    url = f"{self.base_url}{self.search_note_path}?{urlencode(attempt)}"
                     try:
                         response = client.get(url)
                         response.raise_for_status()
@@ -205,20 +211,20 @@ class XiaohongshuTool(BaseTool):
 
     def _normalize_note_type(self, note_type: str) -> str:
         mapping = {
-            "ALL": "_0",
-            "VIDEO": "_1",
-            "NORMAL": "_2",
-            "_0": "_0",
-            "_1": "_1",
-            "_2": "_2",
+            "ALL": "ALL",
+            "VIDEO": "VIDEO",
+            "NORMAL": "NORMAL",
+            "_0": "ALL",
+            "_1": "VIDEO",
+            "_2": "NORMAL",
         }
-        normalized = note_type.strip().upper() if note_type else "_0"
-        return mapping.get(normalized, "_0")
+        normalized = note_type.strip().upper() if note_type else "ALL"
+        return mapping.get(normalized, "ALL")
 
     def _normalize_note_time(self, note_time: str) -> str:
-        allowed = {"", "ONE_DAY", "ONE_WEEK", "HALF_YEAR"}
-        normalized = note_time.strip().upper()
-        return normalized if normalized in allowed else ""
+        allowed = {"ALL", "ONE_DAY", "ONE_WEEK", "HALF_YEAR"}
+        normalized = note_time.strip().upper() or "ALL"
+        return normalized if normalized in allowed else "ALL"
 
     def _build_request_attempts(
         self,
@@ -239,12 +245,21 @@ class XiaohongshuTool(BaseTool):
                 "token": self.token,
                 "keyword": candidate,
                 "page": page,
-                "sort": sort_type,
+                "sortType": sort_type,
                 "noteType": note_type,
+                "timeFilter": time_filter,
             }
-            if time_filter:
-                params["noteTime"] = time_filter
             attempts.append(params)
+            attempts.append(
+                {
+                    "token": self.token,
+                    "keyword": candidate,
+                    "page": page,
+                    "sort": sort_type,
+                    "noteType": {"ALL": "_0", "VIDEO": "_1", "NORMAL": "_2"}.get(note_type, "_0"),
+                    "noteTime": "" if time_filter == "ALL" else time_filter,
+                }
+            )
         return attempts
 
     def _simplify_keyword(self, keyword: str) -> str:

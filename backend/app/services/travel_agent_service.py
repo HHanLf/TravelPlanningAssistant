@@ -5,15 +5,15 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from backend.app.core.config import get_settings
-from backend.app.services.llm_service import DashScopeLLMService
-from backend.app.services.multimodal_service import MultimodalService
-from backend.app.services.redis_memory import RedisMemoryService
-from backend.app.tools.amap_tool import TencentMapTool
-from backend.app.tools.ctrip_tool import CtripTool
-from backend.app.tools.search_tool import SearchTool
-from backend.app.tools.weather_tool import WeatherTool
-from backend.app.tools.xiaohongshu_tool import XiaohongshuTool
+from app.core.config import get_settings
+from app.services.llm_service import DashScopeLLMService
+from app.services.multimodal_service import MultimodalService
+from app.services.redis_memory import RedisMemoryService
+from app.tools.amap_tool import TencentMapTool
+from app.tools.ctrip_tool import CtripTool
+from app.tools.search_tool import SearchTool
+from app.tools.weather_tool import WeatherTool
+from app.tools.xiaohongshu_tool import XiaohongshuTool
 
 
 settings = get_settings()

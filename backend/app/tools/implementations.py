@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.app.domain.models import AgentContext, ToolCategory, ToolResult, ToolSpec
-from backend.app.tools.base import BaseTool
+from app.domain.models import AgentContext, ToolCategory, ToolResult, ToolSpec
+from app.tools.base import BaseTool
 
 
 class WeatherTool(BaseTool):

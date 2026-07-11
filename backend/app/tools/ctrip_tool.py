@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from backend.app.tools.amap_tool import TencentMapTool
+from app.tools.amap_tool import TencentMapTool
 
 
 @dataclass
@@ -19,8 +19,9 @@ class HotelOption:
 
 
 class CtripTool:
-    def __init__(self, api_key: str = "", map_tool: TencentMapTool | None = None) -> None:
+    def __init__(self, api_key: str = "", base_url: str = "", map_tool: TencentMapTool | None = None) -> None:
         self.api_key = api_key
+        self.base_url = base_url.rstrip("/")
         self.map_tool = map_tool or TencentMapTool(api_key)
 
     def search_hotels(self, city: str, budget: int | None = None) -> list[HotelOption]:

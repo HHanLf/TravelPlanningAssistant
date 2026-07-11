@@ -1,4 +1,4 @@
-# Travel Planning Assistant
+﻿# Travel Planning Assistant
 
 一个面向中文旅行场景的智能旅游规划助手，支持多轮对话、行程规划、交通方式比较、天气查询、酒店推荐、地点检索，以及语音/图片等多模态输入。
 
@@ -117,10 +117,17 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 ### 4. 启动后端
 
-在项目根目录执行：
+推荐进入 `backend` 目录启动：
 
 ```bash
-uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+cd backend
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+如果你想在项目根目录启动，也可以使用：
+
+```bash
+uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000
 ```
 
 后端健康检查：
@@ -133,7 +140,7 @@ uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 在 `frontend/` 下创建 `.env`，参考：
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000/api
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
 或者直接参考：
