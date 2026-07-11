@@ -133,3 +133,4 @@ class AgentState:
     reflection_result: ReflectionResult | None = None
     reflection_notes: list[str] = field(default_factory=list)
     loop_count: int = 0
+    response: dict[str, Any] = field(default_factory=dict)
