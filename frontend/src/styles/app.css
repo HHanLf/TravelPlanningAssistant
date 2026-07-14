@@ -784,8 +784,9 @@ a {
 
 .timeline-card {
   display: grid;
-  grid-template-columns: 70px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   gap: 12px;
+  align-items: start;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -796,7 +797,9 @@ a {
 .timeline-card__day {
   display: grid;
   place-items: center;
+  width: 72px;
   min-height: 58px;
+  align-self: start;
   border-radius: var(--radius);
   color: var(--blue);
   background: var(--blue-soft);
@@ -1120,4 +1123,3 @@ a {
     height: 60px;
   }
 }
-

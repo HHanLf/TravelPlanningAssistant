@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Calendar, CloudSun, ExternalLink, Hotel, Map, MapPin, Navigation, NotebookText, Star, Ticket, Utensils } from 'lucide-react'
+import { Calendar, CloudSun, ExternalLink, Hotel, Map as MapIcon, MapPin, Navigation, NotebookText, Star, Ticket, Utensils } from 'lucide-react'
 
 const FALLBACK_IMAGES = {
   attraction: [
@@ -98,18 +98,95 @@ function normalizeContent(item) {
   return item?.content || item?.summary || item?.raw?.summary || item?.address || item?.raw?.address || ''
 }
 
+const CHINESE_DAY_NUMBERS = {
+  一: 1,
+  二: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+}
+
+function parseChineseDayNumber(value = '') {
+  const text = String(value).trim()
+  if (!text) return null
+  if (CHINESE_DAY_NUMBERS[text]) return CHINESE_DAY_NUMBERS[text]
+  if (text.length === 2 && text.startsWith('十')) return 10 + (CHINESE_DAY_NUMBERS[text[1]] || 0)
+  if (text.length === 2 && text.endsWith('十')) return (CHINESE_DAY_NUMBERS[text[0]] || 1) * 10
+  if (text.length === 3 && text[1] === '十') {
+    return (CHINESE_DAY_NUMBERS[text[0]] || 0) * 10 + (CHINESE_DAY_NUMBERS[text[2]] || 0)
+  }
+  return null
+}
+
+function extractItineraryItems(dayText = '') {
+  const lines = String(dayText || '')
+    .split('\n')
+    .map((line) => line.trim().replace(/^[\-*•]\s*/, ''))
+    .filter(Boolean)
+  const items = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(/^(上午|中午|午餐|下午|傍晚|晚上|晚餐)\s*[:：]\s*(.+)$/)
+    if (!match) continue
+
+    const details = []
+    for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+      if (/^(上午|中午|午餐|下午|傍晚|晚上|晚餐)\s*[:：]/.test(lines[nextIndex])) break
+      if (/^(住宿建议|交通建议|预算|提醒|总结|小贴士)/.test(lines[nextIndex])) break
+      details.push(lines[nextIndex])
+    }
+
+    const content =
+      details.find((line) => line.startsWith('亮点')) ||
+      details.find((line) => line.startsWith('建议')) ||
+      details[0] ||
+      '按当天节奏顺路安排，出发前再确认开放时间和交通。'
+
+    items.push({
+      title: `${match[1]}：${match[2]}`,
+      content: content.replace(/^亮点\s*[:：]\s*/, '').replace(/^建议游玩时间\s*[:：]\s*/, '建议游玩时间：'),
+    })
+  }
+
+  return items.slice(0, 4)
+}
+
 function splitDays(answer = '', days = 3) {
   const text = String(answer || '')
-  const matches = [...text.matchAll(/(?:Day\s*\d+|第\s*\d+\s*天|第[一二三四五六七八九十]+天)[^\n]*/g)]
-  if (!matches.length) {
-    return Array.from({ length: Math.max(days, 1) }, (_, index) => ({
-      title: `Day ${index + 1}`,
-      summary: index === 0 ? '抵达与城市初体验' : index === days - 1 ? '轻松收尾与返程缓冲' : '核心片区深度游',
-    }))
-  }
-  return matches.slice(0, 7).map((match, index) => ({
+  const dayCount = Math.min(Math.max(Number(days) || 3, 1), 7)
+  const fallbackSummaries = Array.from({ length: dayCount }, (_, index) => ({
     title: `Day ${index + 1}`,
-    summary: match[0],
+    summary: index === 0 ? '抵达与城市初体验' : index === dayCount - 1 ? '轻松收尾与返程缓冲' : '核心片区深度游',
+    items: [],
+  }))
+  const pattern = /(?:^|\n)\s*(?:[-*]\s*)?(?:(?:Day)\s*(\d+)|第\s*(\d+)\s*天|第([一二三四五六七八九十]+)天)\s*[:：.、-]?\s*([^\n]*)/gi
+  const byDay = new Map()
+  const matches = [...text.matchAll(pattern)]
+
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index]
+    const dayNumber = Number(match[1] || match[2]) || parseChineseDayNumber(match[3])
+    if (!dayNumber || dayNumber < 1 || dayNumber > dayCount || byDay.has(dayNumber)) continue
+
+    const blockStart = (match.index || 0) + match[0].length
+    const blockEnd = index + 1 < matches.length ? matches[index + 1].index : text.length
+    byDay.set(dayNumber, {
+      summary: (match[4] || '').trim(),
+      items: extractItineraryItems(text.slice(blockStart, blockEnd)),
+    })
+  }
+
+  if (!byDay.size) return fallbackSummaries
+
+  return fallbackSummaries.map((fallback, index) => ({
+    title: `Day ${index + 1}`,
+    summary: byDay.get(index + 1)?.summary || fallback.summary,
+    items: byDay.get(index + 1)?.items || [],
   }))
 }
 
@@ -126,7 +203,8 @@ function SectionHeader({ icon: Icon, eyebrow, title }) {
 }
 
 function TimelineCard({ day, attractions }) {
-  const spots = attractions.slice(day.index * 2, day.index * 2 + 2)
+  const attractionSpots = attractions.slice(day.index * 2, day.index * 2 + 2)
+  const spots = attractionSpots.length ? attractionSpots : day.items || []
   return (
     <motion.article className="timeline-card" whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
       <div className="timeline-card__day">{day.title}</div>
@@ -162,7 +240,7 @@ function TimelineCard({ day, attractions }) {
 function MapCard({ attractions, hotels, restaurants }) {
   return (
     <section className="dashboard-card map-card">
-      <SectionHeader icon={Map} eyebrow="Map" title="路线地图" />
+      <SectionHeader icon={MapIcon} eyebrow="Map" title="路线地图" />
       <div className="map-placeholder">
         <div className="map-grid" />
         <div className="map-pin map-pin--one" />

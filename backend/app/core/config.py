@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     qwen_api_key: str = Field(default="", validation_alias=AliasChoices("QWEN_API_KEY", "DASHSCOPE_API_KEY"))
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    qwen_chat_model: str = "qwen-plus"
+    qwen_chat_model: str = "qwen3.6-plus"
     qwen_audio_model: str = "qwen-audio-turbo"
     qwen_embedding_model: str = "text-embedding-v4"
 
