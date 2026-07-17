@@ -98,6 +98,7 @@ class AgentResponse:
     tool_results: dict[str, Any]
     memory_context: dict[str, Any]
     reflection_result: dict[str, Any]
+    problem: dict[str, Any] = field(default_factory=dict)
     knowledge_summary: dict[str, Any] = field(default_factory=dict)
     research_tasks: list[dict[str, Any]] = field(default_factory=list)
     evidence_items: list[dict[str, Any]] = field(default_factory=list)

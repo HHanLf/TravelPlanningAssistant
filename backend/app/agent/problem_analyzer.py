@@ -103,10 +103,14 @@ class ProblemAnalyzer:
         explicit_group_size = self._extract_group_size(text)
         explicit_date_range = self._extract_date_range(text)
         context_scope = self._context_scope(text, explicit_destination)
+        previous_destination = profile.get("destination")
+        is_new_destination = bool(
+            explicit_destination and previous_destination and explicit_destination != previous_destination
+        )
 
-        can_inherit_trip_slots = context_scope != "local_lookup"
+        can_inherit_trip_slots = context_scope != "local_lookup" and not is_new_destination
         origin = explicit_origin or (profile.get("departure") or profile.get("origin") if can_inherit_trip_slots else None)
-        destination = explicit_destination or profile.get("destination")
+        destination = explicit_destination or (profile.get("destination") if context_scope != "local_lookup" else None)
         days = explicit_days or (profile.get("days") if can_inherit_trip_slots else None)
         budget = explicit_budget or (profile.get("budget") if can_inherit_trip_slots else None)
         group_size = explicit_group_size or (
@@ -197,7 +201,7 @@ class ProblemAnalyzer:
             r"(?:给我|帮我|请|推荐|找|搜|看看|查)?\s*([\u4e00-\u9fa5A-Za-z]{2,20}?)\s*的(?:餐厅|饭店|美食|小吃|咖啡|酒店|住宿|民宿|景点|天气)",
             r"(?:给我|帮我|请|推荐|找|搜|看看|查)\s*([\u4e00-\u9fa5A-Za-z]{2,20}?)(?:餐厅|饭店|美食|小吃|咖啡|酒店|住宿|民宿|景点|天气)",
             r"(?:去|到|玩|游)\s*([\u4e00-\u9fa5A-Za-z]{2,12})",
-            r"([\u4e00-\u9fa5A-Za-z]{2,12})\s*(?:旅游|旅行|攻略|行程|自由行|几日游)",
+            r"([\u4e00-\u9fa5A-Za-z]{2,12})\s*(?:旅游|旅行|攻略|行程|路线|自由行|几日游)",
         )
         for pattern in patterns:
             match = re.search(pattern, text)
@@ -206,7 +210,7 @@ class ProblemAnalyzer:
                 if city and city != origin:
                     return city
 
-        found = [city for city in self.CITY_NAMES if city in text]
+        found = [city for city in self._known_destinations() if city in text]
         ordered = self._ordered_city_mentions(text)
         if origin and origin in ordered and len(ordered) > 1:
             ordered = [city for city in ordered if city != origin]
@@ -403,13 +407,17 @@ class ProblemAnalyzer:
         for word in stop_words:
             cleaned = cleaned.replace(word, "")
         cleaned = re.split(r"(?:玩|旅游|旅行|攻略|行程|自由行|几日游)", cleaned, maxsplit=1)[0]
+        if "的" in cleaned:
+            tail = cleaned.rsplit("的", 1)[1]
+            if 2 <= len(tail) <= 12:
+                cleaned = tail
         cleaned = re.sub(r"(的|地|之旅|路线|安排|规划)$", "", cleaned)
         return cleaned or None
 
     @classmethod
     def _ordered_city_mentions(cls, text: str) -> list[str]:
         matches: list[tuple[int, str]] = []
-        for city in cls.CITY_NAMES:
+        for city in cls._known_destinations():
             index = text.find(city)
             if index >= 0:
                 matches.append((index, city))
@@ -419,6 +427,11 @@ class ProblemAnalyzer:
             if city not in ordered:
                 ordered.append(city)
         return ordered
+
+    @classmethod
+    def _known_destinations(cls) -> tuple[str, ...]:
+        region_names = tuple(cls.REGION_DEFAULT_DESTINATIONS.keys())
+        return (*cls.CITY_NAMES, *region_names)
 
     @staticmethod
     def _safe_int(value: Any) -> int | None:

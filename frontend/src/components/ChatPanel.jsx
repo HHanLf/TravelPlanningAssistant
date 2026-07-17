@@ -1,5 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { ArrowUp, Image, Mic, Pause, Sparkles, X } from 'lucide-react'
+import { AlertCircle, ArrowUp, Image, Loader2, Menu, Mic, Pause, Plus, Sparkles, X } from 'lucide-react'
+
+const QUICK_PROMPTS = [
+  '帮我规划 5 天东京亲子游，预算 8000 元',
+  '预算 5000 元，适合情侣的云南路线',
+  '第一次去欧洲，10 天怎么玩',
+  '从上海出发，3 天周末海岛放松游',
+]
 
 function parseInline(text) {
   const imageMatch = text.match(/^!\[(.*?)\]\((.*?)\)$/)
@@ -9,14 +16,68 @@ function parseInline(text) {
   return text
 }
 
+function isTableLine(line) {
+  const trimmed = line.trim()
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.includes('|')
+}
+
+function isSeparatorLine(line) {
+  return /^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim())
+}
+
+function MarkdownTable({ rows }) {
+  const parsedRows = rows
+    .filter((row) => !isSeparatorLine(row))
+    .map((row) =>
+      row
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim()),
+    )
+    .filter((row) => row.some(Boolean))
+
+  if (!parsedRows.length) {
+    return null
+  }
+
+  const [head, ...body] = parsedRows
+  return (
+    <div className="markdown-table-wrap">
+      <table className="markdown-table">
+        <thead>
+          <tr>
+            {head.map((cell, index) => (
+              <th key={`${cell}-${index}`}>{parseInline(cell)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, rowIndex) => (
+            <tr key={`row-${rowIndex}`}>
+              {head.map((_, cellIndex) => (
+                <td key={`cell-${rowIndex}-${cellIndex}`}>{parseInline(row[cellIndex] || '')}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function MarkdownLite({ content = '' }) {
   const lines = String(content).split('\n')
   const blocks = []
   let codeBuffer = []
   let inCode = false
 
-  lines.forEach((line, index) => {
-    if (line.trim().startsWith('```')) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
+    const trimmed = line.trim()
+
+    if (trimmed.startsWith('```')) {
       if (inCode) {
         blocks.push(
           <pre className="code-block" key={`code-${index}`}>
@@ -26,37 +87,60 @@ function MarkdownLite({ content = '' }) {
         codeBuffer = []
       }
       inCode = !inCode
-      return
+      continue
     }
+
     if (inCode) {
       codeBuffer.push(line)
-      return
+      continue
     }
-    if (!line.trim()) {
+
+    if (!trimmed) {
       blocks.push(<div className="markdown-space" key={`space-${index}`} />)
-    } else if (/^#{1,3}\s/.test(line)) {
+      continue
+    }
+
+    if (/^#{1,3}\s/.test(trimmed)) {
       blocks.push(
         <h3 className="markdown-title" key={`title-${index}`}>
-          {line.replace(/^#{1,3}\s/, '')}
+          {trimmed.replace(/^#{1,3}\s/, '')}
         </h3>,
       )
-    } else if (/^\s*[-*]\s/.test(line)) {
+      continue
+    }
+
+    if (/^\s*[-*]\s/.test(line) || /^\s*\d+\.\s/.test(line)) {
       blocks.push(
         <div className="markdown-bullet" key={`bullet-${index}`}>
           <span />
-          <p>{parseInline(line.replace(/^\s*[-*]\s/, ''))}</p>
+          <p>{parseInline(line.replace(/^\s*([-*]|\d+\.)\s/, ''))}</p>
         </div>,
       )
-    } else if (line.includes('|') && line.trim().startsWith('|')) {
-      blocks.push(
-        <pre className="table-block" key={`table-${index}`}>
-          {line}
-        </pre>,
-      )
-    } else {
-      blocks.push(<p key={`p-${index}`}>{parseInline(line)}</p>)
+      continue
     }
-  })
+
+    if (isTableLine(line)) {
+      const tableRows = []
+      let nextIndex = index
+      while (nextIndex < lines.length && isTableLine(lines[nextIndex])) {
+        tableRows.push(lines[nextIndex])
+        nextIndex += 1
+      }
+      blocks.push(<MarkdownTable rows={tableRows} key={`table-${index}`} />)
+      index = nextIndex - 1
+      continue
+    }
+
+    blocks.push(<p key={`p-${index}`}>{parseInline(line)}</p>)
+  }
+
+  if (inCode && codeBuffer.length) {
+    blocks.push(
+      <pre className="code-block" key="code-final">
+        <code>{codeBuffer.join('\n')}</code>
+      </pre>,
+    )
+  }
 
   return <div className="markdown-body">{blocks}</div>
 }
@@ -64,12 +148,46 @@ function MarkdownLite({ content = '' }) {
 function TypingIndicator() {
   return (
     <div className="typing-card">
-      <div className="typing-dots">
+      <div className="typing-dots" aria-hidden="true">
         <span />
         <span />
         <span />
       </div>
-      <p>Agent 正在研究路线、天气、住宿和本地经验</p>
+      <p>正在整理路线、交通、住宿和预算建议</p>
+    </div>
+  )
+}
+
+function EmptyState({ onUsePrompt }) {
+  return (
+    <div className="empty-state">
+      <h1>想去哪里旅行？</h1>
+      <p>告诉我目的地、天数、预算和偏好，我来帮你规划。</p>
+      <div className="prompt-grid" aria-label="旅行规划示例">
+        {QUICK_PROMPTS.map((prompt) => (
+          <button type="button" className="prompt-chip" key={prompt} onClick={() => onUsePrompt(prompt)}>
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function TripFactChips({ state = {}, destination }) {
+  const profile = state?.memory_context?.user_profile || state?.profile || {}
+  const problem = state?.problem || {}
+  const facts = [
+    destination ? `目的地：${destination}` : '',
+    problem.days || profile.days ? `${problem.days || profile.days} 天` : '天数待定',
+    problem.budget || profile.budget ? `预算 ¥${problem.budget || profile.budget}` : '预算待定',
+  ].filter(Boolean)
+
+  return (
+    <div className="trip-facts" aria-label="当前旅行要素">
+      {facts.slice(0, 3).map((fact) => (
+        <span key={fact}>{fact}</span>
+      ))}
     </div>
   )
 }
@@ -95,104 +213,110 @@ export function ChatPanel({
   audioPreview,
   onClearAudio,
   audioTranscript,
+  onOpenSidebar,
+  destination,
+  hasUserMessages,
+  conversationState,
+  apiStatus,
 }) {
-  const quickPrompts = [
-    '帮我规划杭州 3 天 2 晚，预算 5000，喜欢自然风景',
-    '从济南去北京玩 3 天，偏好历史建筑，预算 3000',
-    '想去成都吃美食和逛博物馆，2 人 4 天怎么安排',
-    '比较一下去上海旅游坐高铁还是飞机更合适',
-  ]
+  const visibleMessages = hasUserMessages ? messages : []
 
   return (
     <section className="chat-panel">
-      <div className="chat-panel__header">
-        <div>
-          <p>AI Chat</p>
-          <h1>旅行规划对话</h1>
+      <header className="chat-header">
+        <button type="button" className="icon-button chat-header__menu" onClick={onOpenSidebar} aria-label="打开侧边栏">
+          <Menu size={18} />
+        </button>
+        <div className="chat-header__copy">
+          <button type="button" className="model-switch">
+            Travel Planner
+            <span>AI</span>
+          </button>
+          <TripFactChips state={conversationState} destination={destination} />
         </div>
-        <div className="live-pill">
-          <Sparkles size={15} />
-          <span>{loading ? 'Researching' : 'Ready'}</span>
+        <div className={`status-pill status-pill--${apiStatus?.state || 'checking'} ${loading ? 'status-pill--loading' : ''}`}>
+          {loading ? <Loader2 size={14} className="spin" /> : <Sparkles size={14} />}
+          <span>{loading ? '规划中' : apiStatus?.state === 'online' ? '已连接' : apiStatus?.state === 'offline' ? '未连接' : '检查中'}</span>
         </div>
-      </div>
+      </header>
 
       <div className="chat-scroll" ref={chatListRef}>
-        {messages.length <= 1 ? (
-          <div className="welcome-card">
-            <div className="welcome-card__icon">
-              <Sparkles size={24} />
-            </div>
-            <h2>今天想去哪里？</h2>
-            <p>告诉我目的地、天数、预算、出发地和偏好，我会把聊天、研究、工具结果和行程看板一起整理出来。</p>
-            <div className="prompt-grid">
-              {quickPrompts.map((prompt) => (
-                <button type="button" className="prompt-card" key={prompt} onClick={() => onUsePrompt(prompt)}>
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+        {!hasUserMessages ? (
+          <EmptyState onUsePrompt={onUsePrompt} />
         ) : (
           <div className="message-list">
             <AnimatePresence initial={false}>
-              {messages.slice(1).map((item, index) => (
+              {visibleMessages.map((item, index) => (
                 <motion.article
                   className={`message message--${item.role}`}
-                  key={`${item.role}-${index}-${item.content.slice(0, 12)}`}
-                  initial={{ opacity: 0, y: 14, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  key={`${item.role}-${index}-${item.content.slice(0, 18)}`}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.22 }}
+                  transition={{ duration: 0.18 }}
                 >
                   <div className="message__avatar">{item.role === 'assistant' ? 'AI' : '你'}</div>
                   <div className="message__bubble">
-                    <div className="message__meta">{item.role === 'assistant' ? 'Travel Agent' : 'Traveler'}</div>
                     <MarkdownLite content={item.content} />
                   </div>
                 </motion.article>
               ))}
             </AnimatePresence>
-            {loading && (
-              <motion.article className="message message--assistant" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+            {loading ? (
+              <motion.article className="message message--assistant" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 <div className="message__avatar">AI</div>
                 <div className="message__bubble">
                   <TypingIndicator />
                 </div>
               </motion.article>
-            )}
+            ) : null}
           </div>
         )}
       </div>
 
       <div className="composer-wrap">
-        {error ? <div className="error-banner">{error}</div> : null}
-        <div className="composer">
+        {error ? (
+          <div className="error-banner" role="alert">
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+        ) : null}
+
+        <div className={`composer ${message ? 'composer--active' : ''}`}>
           <textarea
             ref={textareaRef}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="描述你的旅行需求，例如：从济南出发去北京 3 天 2 晚，预算 3000，喜欢历史建筑，少走路。"
+            placeholder="告诉我你想去哪里、玩几天、预算多少、喜欢什么风格..."
             rows={1}
+            aria-label="旅行规划需求"
           />
 
-          <div className="composer__tools">
-            <button type="button" className="tool-button" title="图片展示预留">
-              <Image size={17} />
-            </button>
-            {speechSupported && (
-              <button
-                type="button"
-                className={`tool-button ${isRecording ? 'tool-button--recording' : ''}`}
-                title={isRecording ? '停止录音' : '语音输入'}
-                onClick={isRecording ? onStopRecording : onStartRecording}
-              >
-                {isRecording ? <Pause size={17} /> : <Mic size={17} />}
-                {isRecording && <span>{formatTime(recordingTime)}</span>}
+          <div className="composer__bottom">
+            <div className="composer__tools">
+              <button type="button" className="tool-button" title="添加内容" aria-label="添加内容">
+                <Plus size={17} />
               </button>
-            )}
-            <button type="button" className="send-button" onClick={onSend} disabled={!canSend}>
-              <ArrowUp size={18} />
+              <button type="button" className="tool-button" title="图片功能预留" aria-label="图片功能预留">
+                <Image size={17} />
+              </button>
+              {speechSupported ? (
+                <button
+                  type="button"
+                  className={`tool-button ${isRecording ? 'tool-button--recording' : ''}`}
+                  title={isRecording ? '停止录音' : '语音输入'}
+                  aria-label={isRecording ? '停止录音' : '语音输入'}
+                  onClick={isRecording ? onStopRecording : onStartRecording}
+                >
+                  {isRecording ? <Pause size={17} /> : <Mic size={17} />}
+                  {isRecording ? <span>{formatTime(recordingTime)}</span> : null}
+                </button>
+              ) : null}
+            </div>
+
+            <button type="button" className="send-button" onClick={onSend} disabled={!canSend} aria-label="发送消息">
+              {loading ? <Loader2 size={18} className="spin" /> : <ArrowUp size={18} />}
             </button>
           </div>
 
@@ -211,6 +335,7 @@ export function ChatPanel({
             </div>
           ) : null}
         </div>
+        <p className="composer-hint">Enter 发送，Shift + Enter 换行。</p>
       </div>
     </section>
   )
@@ -221,4 +346,3 @@ function formatTime(totalSeconds) {
   const seconds = String(totalSeconds % 60).padStart(2, '0')
   return `${minutes}:${seconds}`
 }
-

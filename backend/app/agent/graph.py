@@ -352,11 +352,12 @@ class TravelAgentGraph:
             tool_results=self._tool_results_payload(state.tool_results),
             memory_context=state.memory_context,
             reflection_result=state.reflection_result.to_dict() if state.reflection_result else {},
+            problem=state.problem.to_dict() if state.problem else {},
             knowledge_summary=state.knowledge_summary,
             research_tasks=state.research_tasks,
             evidence_items=state.evidence_items,
             retrieved_docs=state.retrieved_docs,
-            profile=state.profile,
+            profile=self._response_profile(state),
             multimodal_summary=state.multimodal_summary,
             audio_transcript=state.audio_transcript,
         )
@@ -371,6 +372,26 @@ class TravelAgentGraph:
         for name, values in by_name.items():
             payload[name] = values[0] if len(values) == 1 else values
         return payload
+
+    @staticmethod
+    def _response_profile(state: AgentState) -> dict[str, Any]:
+        profile = dict(state.profile or {})
+        if not state.problem:
+            return profile
+        problem_profile = {
+            "departure": state.problem.origin,
+            "destination": state.problem.destination,
+            "budget": state.problem.budget,
+            "days": state.problem.days,
+            "companions": state.problem.group_size,
+            "preferences": state.problem.preferences,
+            "date_range": state.problem.date_range,
+            "constraints": state.problem.constraints,
+        }
+        for key, value in problem_profile.items():
+            if value not in (None, "", []):
+                profile[key] = value
+        return profile
 
     def _reflection_max_rounds(self) -> int:
         return max(1, int(self._settings.reflection_max_rounds or 1))

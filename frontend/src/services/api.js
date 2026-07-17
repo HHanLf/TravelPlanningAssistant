@@ -1,4 +1,8 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+
+function apiUrl(path) {
+  return `${API_BASE_URL}${path}`
+}
 
 async function parseResponse(response) {
   const data = await response.json().catch(() => ({}))
@@ -8,8 +12,16 @@ async function parseResponse(response) {
   return data
 }
 
+export async function checkApiHealth() {
+  const response = await fetch(apiUrl('/api/v1/health'), {
+    method: 'GET',
+  })
+
+  return parseResponse(response)
+}
+
 export async function sendChatMessage(message, sessionId = 'default') {
-  const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+  const response = await fetch(apiUrl('/api/v1/chat'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -31,7 +43,7 @@ export async function sendMultimodalMessage({ message, sessionId = 'default', au
     formData.append('audio', audioFile)
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/v1/chat/multimodal`, {
+  const response = await fetch(apiUrl('/api/v1/chat/multimodal'), {
     method: 'POST',
     body: formData,
   })

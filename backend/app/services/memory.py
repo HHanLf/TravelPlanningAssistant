@@ -283,13 +283,19 @@ class MemoryService:
         incoming_destination = updates.get("destination")
         if incoming_destination and profile.destination and incoming_destination != profile.destination:
             self.clear_destination_context(session_id)
-            if context_scope == "local_lookup":
-                profile.budget = None
+            if "origin" not in explicit_fields and "departure" not in explicit_fields:
+                profile.departure = None
+            if "days" not in explicit_fields:
                 profile.days = None
+            if "budget" not in explicit_fields:
+                profile.budget = None
+            if "group_size" not in explicit_fields and "companions" not in explicit_fields:
                 profile.companions = None
+            if "preferences" not in explicit_fields:
                 profile.preferences = []
+            if "date_range" not in explicit_fields:
                 profile.date_range = None
-                profile.constraints = {}
+            profile.constraints = {}
         for key, value in updates.items():
             if value in (None, "", []):
                 continue

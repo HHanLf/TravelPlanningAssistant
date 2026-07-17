@@ -23,6 +23,9 @@ class AnswerGenerator:
 
     def generate(self, state: AgentState, force_fallback: bool = False) -> str:
         blocking_errors = self._blocking_tool_errors(state)
+        intent_type = state.intent.type if state.intent else ""
+        if blocking_errors and intent_type == "trip_plan":
+            return self._fallback_answer(state)
         if blocking_errors:
             return self._tool_error_answer(state, blocking_errors)
         if force_fallback:
@@ -59,35 +62,19 @@ class AnswerGenerator:
         problem = state.problem
         destination = problem.destination if problem and problem.destination else "本次目的地"
         intent_type = state.intent.type if state.intent else ""
-        title = "当前无法生成可靠行程" if intent_type == "trip_plan" else "当前无法完成可靠查询"
+        labels = "、".join(self._tool_label(result.name) for result in errors[:3])
+        title = "实时信息暂时不可用" if intent_type != "trip_plan" else "先给你一版保守行程"
         lines = [
             title,
             "",
-            f"我没有继续返回兜底方案，因为关键外部 API 调用失败；如果继续生成，会把没有工具依据的内容误当成真实行程，容易误导你。",
+            f"我暂时没有拿到 {destination} 的{labels or '实时'}结果，所以不会把具体班次、实时价格或开放状态当成确定信息。",
             "",
-            "失败详情",
+            "你现在可以这样处理：",
+            "- 如果只是先做规划，我可以按常规路线、预算和偏好给一版保守建议。",
+            "- 出发前再核对天气、交通班次、酒店价格和景区开放时间。",
         ]
-        for result in errors:
-            label = self._tool_label(result.name)
-            args = self._format_arguments(result.arguments)
-            lines.append(f"- {label}：{result.error or result.summary or '工具调用失败'}")
-            if args:
-                lines.append(f"  参数：{args}")
-        lines.extend(
-            [
-                "",
-                "可能原因",
-                "- `.env` 中腾讯地图 Key 没有配置、填错，或后端没有读取到。",
-                "- 腾讯位置服务控制台没有给该 Key 开通 WebService API，尤其是地点搜索、地理编码、路线规划或天气服务。",
-                "- Key 设置了 IP 白名单、域名白名单或签名校验，当前本地后端请求不满足限制。",
-                "- 调用额度耗尽、接口被限流，或腾讯接口返回了非 0 的 status。",
-                "",
-                "建议检查",
-                "- 检查 `backend/.env` 或项目根目录 `.env` 中的 `TENCENT_MAP_API_KEY`。",
-                "- 在腾讯地图控制台确认地点搜索、地理编码、路线规划、天气查询权限都已开通。",
-                f"- 修复后重新提问：例如“从济南到{destination} 3 天 2 晚，预算 6000，喜欢自然风光”。",
-            ]
-        )
+        if intent_type in {"weather", "transport_advice", "hotel_search", "restaurant_recommendation", "place_search"}:
+            lines.append(f"- 你也可以补充日期、出发地或预算，我会先按 {destination} 的常规经验继续收敛方案。")
         return "\n".join(lines)
 
     @staticmethod
@@ -171,6 +158,8 @@ class AnswerGenerator:
         safe_results: list[dict[str, Any]] = []
         for item in tool_results:
             result = item.to_dict()
+            if result.get("error"):
+                result["error"] = "实时信息暂时不可用"
             payload = result.get("payload")
             if isinstance(payload, dict):
                 sanitized_payload = dict(payload)
@@ -220,6 +209,7 @@ class AnswerGenerator:
         hotels = self._hotels(state.tool_results)
         route = self._route_brief(state.tool_results)
         xhs = self._xiaohongshu_brief(state.tool_results)
+        tool_limit_notice = self._tool_limit_notice(state.tool_results)
         budget_lines = self._budget_lines(problem.budget, days, group_size)
         missing = self._missing_info_text(problem.missing_info)
         assumptions = self._assumption_lines(problem, group_size)
@@ -236,6 +226,8 @@ class AnswerGenerator:
             lines.extend(["", "本次偏好与约束", f"- {constraints}"])
 
         lines.extend(["", "先说结论", f"- 这趟更适合做「{self._trip_theme(preferences)}」路线，不建议只挤热门商圈；把山林、湿地、湖泊和城市夜景分开安排，体验会更舒服。"])
+        if tool_limit_notice:
+            lines.append(f"- {tool_limit_notice}")
         if weather:
             lines.append(f"- 天气提醒：{weather}")
         if route:
@@ -429,6 +421,15 @@ class AnswerGenerator:
                 return f"已参考近期旅行笔记：{titles}"
         return "部分实时笔记暂时未取到，本版先依据天气、地图和预算做保守安排。"
 
+    @staticmethod
+    def _tool_limit_notice(tool_results: list[ToolResult]) -> str:
+        if any(
+            item.name in AnswerGenerator.CRITICAL_TOOL_NAMES and not item.success and item.error
+            for item in tool_results
+        ):
+            return "部分实时地图、交通、住宿或餐饮信息暂时未取到；下面先按常规动线和预算给可执行初版，出发前再核对班次、开放时间和价格。"
+        return ""
+
     def _itinerary_days(
         self,
         destination: str,
@@ -445,6 +446,75 @@ class AnswerGenerator:
     @staticmethod
     def _curated_itinerary(destination: str, preferences: list[str]) -> list[dict[str, Any]]:
         preference_text = "、".join(preferences)
+        if destination == "云南":
+            return [
+                {
+                    "day": 1,
+                    "title": "昆明抵达与城市慢逛",
+                    "morning": {
+                        "name": "抵达昆明 / 翠湖公园",
+                        "description": "第一天先把节奏放轻，抵达后去翠湖、公园周边和老街适应海拔与天气。",
+                        "highlights": ["翠湖散步", "云南大学周边", "昆明老街", "轻松拍照"],
+                        "duration": "2-3 小时",
+                    },
+                    "afternoon": {
+                        "name": "昆明老街 / 南强街",
+                        "description": "适合情侣慢逛、喝咖啡、拍街景，强度低，也方便安排第一顿云南菜。",
+                        "highlights": ["老街建筑", "咖啡小店", "鲜花饼", "过桥米线"],
+                        "duration": "2 小时左右",
+                    },
+                    "evening": {
+                        "name": "昆明夜市 / 早休息",
+                        "description": "晚上吃本地小吃后早点休息，为第二天去大理留体力。",
+                        "highlights": ["菌菇火锅", "烧烤小吃", "少折返"],
+                        "duration": "1.5 小时左右",
+                    },
+                },
+                {
+                    "day": 2,
+                    "title": "大理洱海与古城",
+                    "morning": {
+                        "name": "昆明到大理 / 洱海生态廊道",
+                        "description": "上午高铁到大理后直奔洱海边，选择一段生态廊道骑行或散步，不必环完整圈。",
+                        "highlights": ["洱海风景", "骑行", "海边合照", "节奏舒适"],
+                        "duration": "3 小时左右",
+                    },
+                    "afternoon": {
+                        "name": "喜洲古镇 / 双廊二选一",
+                        "description": "想轻松拍照选喜洲，想看海景民宿氛围选双廊；情侣游建议不要两边都赶。",
+                        "highlights": ["白族建筑", "麦田风景", "海景咖啡", "慢节奏"],
+                        "duration": "2-3 小时",
+                    },
+                    "evening": {
+                        "name": "大理古城",
+                        "description": "晚上回古城吃饭和散步，住宿也建议放在古城或洱海西线附近。",
+                        "highlights": ["古城夜景", "白族菜", "酒吧街外圈散步"],
+                        "duration": "2 小时左右",
+                    },
+                },
+                {
+                    "day": 3,
+                    "title": "丽江古城与雪山远景",
+                    "morning": {
+                        "name": "大理到丽江 / 束河古镇",
+                        "description": "上午去丽江后先逛束河，氛围比大研古城更安静，适合情侣慢游。",
+                        "highlights": ["纳西古镇", "溪流巷道", "咖啡小院", "拍照"],
+                        "duration": "2-3 小时",
+                    },
+                    "afternoon": {
+                        "name": "白沙古镇 / 玉龙雪山远眺",
+                        "description": "预算 5000 元内不强行安排高成本雪山大套票，先用白沙古镇和雪山远景控制花费。",
+                        "highlights": ["雪山远景", "白沙壁画周边", "安静街巷", "情侣合照"],
+                        "duration": "2-3 小时",
+                    },
+                    "evening": {
+                        "name": "丽江古城",
+                        "description": "晚上进大研古城看夜景和吃饭，避开过度商业化主街，走外围巷子会舒服一些。",
+                        "highlights": ["古城夜景", "腊排骨", "纳西烤鱼", "返程缓冲"],
+                        "duration": "2 小时左右",
+                    },
+                },
+            ]
         if not any(keyword in preference_text for keyword in ("自然", "风景", "山水", "湿地", "森林", "海边", "徒步")):
             return []
         if destination == "厦门":
@@ -681,6 +751,11 @@ class AnswerGenerator:
                 "- 优先住：思明区中山路、厦大/沙坡尾、白城沙滩或曾厝垵附近，方便衔接植物园、鼓浪屿码头和环岛路。",
                 "- 如果更看重海边氛围，可以选环岛路/曾厝垵；如果更看重交通和吃饭便利，中山路/轮渡附近会更稳。",
             ]
+        elif destination == "云南":
+            lines = [
+                "- 建议分段住：昆明 1 晚住翠湖/老街周边，大理 1 晚住古城或洱海西线，丽江可住束河或古城外圈。",
+                "- 情侣出行优先选安静、交通方便、可步行吃饭的客栈，不必追求过贵海景房，把预算留给交通和体验更稳。",
+            ]
         else:
             lines = ["- 建议优先选核心景区与地铁/公交之间的中间区域，避免每天跨城折返。"]
         if budget and nights:
@@ -699,6 +774,11 @@ class AnswerGenerator:
             lines = [
                 "- 可以穿插厦门特色：沙茶面、海蛎煎、姜母鸭、土笋冻、花生汤、烧肉粽。",
                 "- 鼓浪屿当天不建议为单个网红店排太久，晚餐回中山路/鹭江道一带选择会更稳。",
+            ]
+        elif destination == "云南":
+            lines = [
+                "- 可以穿插云南特色：过桥米线、菌菇火锅、白族菜、乳扇、鲜花饼、腊排骨火锅。",
+                "- 预算 5000 元内建议每天 1 顿特色正餐 + 1 顿轻食小吃，不为网红店长距离跨城绕路。",
             ]
         else:
             return []
@@ -720,6 +800,11 @@ class AnswerGenerator:
                 "- 如果你偏爱自然风光，这条路线重点放在海岸线、植物园、鼓浪屿海岛和湿地湾区。",
                 "- 相比只逛商业街和网红店，这样能更好体验厦门的山海城市气质。",
                 "- 如果遇到高温或下雨，Day 1 的植物园和 Day 2 的鼓浪屿都可以压缩时长，把更多时间留给海边散步和咖啡休息。",
+            ]
+        if destination == "云南":
+            return [
+                "- 这条线更适合第一次去云南、预算有限又想兼顾风景和氛围的情侣。",
+                "- 3 天只能做昆明 + 大理 + 丽江快线初稿；如果能加到 5-6 天，建议把大理和丽江各多留 1 天，体验会明显更松弛。",
             ]
         if itinerary_days:
             return ["- 这版安排按每天 1 个主片区控制通勤，适合先作为初稿，再根据酒店位置和出发时间微调。"]

@@ -122,7 +122,7 @@ class IntentAnalyzer:
     def _is_comprehensive_trip_request(text: str, problem: PlanningProblem | None) -> bool:
         if not problem or not problem.destination:
             return False
-        has_trip_context = any(keyword in text for keyword in ("玩", "游", "旅游", "旅行", "行程", "攻略", "规划", "自由行"))
+        has_trip_context = any(keyword in text for keyword in ("玩", "游", "旅游", "旅行", "行程", "路线", "攻略", "规划", "自由行"))
         has_planning_signal = bool(problem.days or problem.budget or problem.preferences or problem.group_size)
         explicit_transport_only = IntentAnalyzer._is_explicit_transport_request(text) and not has_planning_signal
         return has_trip_context and has_planning_signal and not explicit_transport_only

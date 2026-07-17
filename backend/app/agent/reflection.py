@@ -39,24 +39,29 @@ class ReflectionAgent:
         suggestions: list[str] = []
 
         critical_errors = self._critical_tool_errors(state)
-        if critical_errors:
-            transparent = "当前无法生成可靠" in answer or "当前无法完成可靠" in answer
-            names_covered = all(self._tool_label(item.name) in answer or (item.error and item.error in answer) for item in critical_errors)
-            if transparent and names_covered:
+        if critical_errors and intent_type != "trip_plan":
+            transparent = "实时信息暂时不可用" in answer or "暂时没有拿到" in answer
+            if transparent:
                 return ReflectionResult(
                     passed=True,
-                    score=90,
+                    score=86,
                     issues=[],
-                    suggestions=["关键工具失败已明确告知用户，已停止兜底生成。"],
+                    suggestions=["实时查询不可用时已给出用户可理解的保守说明。"],
                     round=round_index,
                 )
             return ReflectionResult(
                 passed=False,
                 score=45,
-                issues=["关键工具失败时没有明确返回错误原因。"],
-                suggestions=["不要继续生成兜底行程；请列出失败工具、参数、错误信息和排查建议。"],
+                issues=["实时查询失败时没有给出用户可理解的说明。"],
+                suggestions=["不要暴露内部错误、参数或配置；请说明实时信息暂时不可用，并给出下一步保守建议。"],
                 round=round_index,
             )
+        if critical_errors and intent_type == "trip_plan":
+            if "暂时未取到" in answer or "出发前再核对" in answer or "保守" in answer:
+                score += 6
+            else:
+                issues.append("实时工具失败时，行程没有说明哪些信息需要出发前再核对。")
+                suggestions.append("自然说明部分实时信息暂时未取到，继续给出保守可执行方案。")
 
         if len(answer.strip()) >= 80:
             score += 15
@@ -80,7 +85,7 @@ class ReflectionAgent:
                     score += 10
                 elif any(item.error for item in tool_results):
                     score += 3
-                    suggestions.append("工具失败时要透明说明，并给出不依赖实时数据的保守建议。")
+                    suggestions.append("实时信息失败时要用用户语言说明，并给出不依赖实时数据的保守建议。")
             else:
                 issues.append("计划需要工具，但回答前没有工具结果。")
                 suggestions.append("重新执行工具或解释无法获取实时结果。")

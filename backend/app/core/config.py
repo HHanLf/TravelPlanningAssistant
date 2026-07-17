@@ -15,7 +15,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_debug: bool = True
     api_prefix: str = "/api/v1"
-    cors_origins: str | list[str] = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str | list[str] = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
+    cors_origin_regex: str | None = r"^https?://(localhost|127\.0\.0\.1):51\d{2}$"
 
     llm_provider: str = "dashscope"
     llm_model: str = "travel-planner-v1"
